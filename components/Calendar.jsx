@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CalendarDays, Loader2, Lock, Palette, TriangleAlert } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Lock, Palette } from 'lucide-react';
 
 const DIAS_SEMANA = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira'];
 const MAXIMO_SELECIONADOS = 4;
 const HORA_INICIO = 9;
 const HORA_FIM = 18;
+const CHAVE_STORAGE = 'calendario-inteligente:agenda:v1';
 
 // Paletas de tema: cada valor é uma string literal completa de classes Tailwind
 // (necessário para o Tailwind conseguir detectá-las durante o build).
@@ -57,98 +58,127 @@ const TEMAS = {
 const ESTILOS_FIXOS = {
   selecionado: 'bg-blue-100 hover:bg-blue-200 text-blue-800 font-semibold ring-2 ring-blue-400 shadow-sm cursor-pointer',
   sugestao: 'bg-amber-300 hover:bg-amber-400 text-amber-900 font-semibold shadow-sm cursor-pointer',
-  bloqueado: 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed',
+  ocupado: 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed',
+  interna: 'bg-gray-700 text-white font-semibold cursor-not-allowed shadow-inner',
 };
 
 function ehBloqueado(status) {
   return status === 'interna' || status === 'ocupado';
 }
 
+function pad(numero) {
+  return String(numero).padStart(2, '0');
+}
+
 function gerarHorarios(inicioHora, fimHora, intervaloMinutos = 30) {
   const horarios = [];
   for (let minutos = inicioHora * 60; minutos < fimHora * 60; minutos += intervaloMinutos) {
-    const hh = String(Math.floor(minutos / 60)).padStart(2, '0');
-    const mm = String(minutos % 60).padStart(2, '0');
+    const hh = pad(Math.floor(minutos / 60));
+    const mm = pad(minutos % 60);
     horarios.push(`${hh}:${mm}`);
   }
   return horarios;
 }
 
-function getDiasDoMesDaSemanaAtual() {
+// Segunda-feira (00:00) da semana atual, deslocada em "deltaSemanas" semanas inteiras.
+function obterSegundaFeira(deltaSemanas) {
   const hoje = new Date();
   const diaSemanaHoje = hoje.getDay(); // 0 = domingo ... 6 = sábado
   const offsetAteSegunda = diaSemanaHoje === 0 ? -6 : 1 - diaSemanaHoje;
 
-  const segundaFeira = new Date(hoje);
-  segundaFeira.setDate(hoje.getDate() + offsetAteSegunda);
+  const segunda = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  segunda.setDate(segunda.getDate() + offsetAteSegunda + deltaSemanas * 7);
+  return segunda;
+}
 
+// Datas reais (Segunda a Sexta) da semana selecionada.
+function obterDiasDaSemana(deltaSemanas) {
+  const segunda = obterSegundaFeira(deltaSemanas);
   return DIAS_SEMANA.map((_, index) => {
-    const data = new Date(segundaFeira);
-    data.setDate(segundaFeira.getDate() + index);
-    return data.getDate();
+    const data = new Date(segunda);
+    data.setDate(segunda.getDate() + index);
+    return data;
   });
+}
+
+// Chave de armazenamento do slot: "YYYY-MM-DD-HH:MM", presa à data real (não ao dia genérico).
+function formatarChaveData(data) {
+  return `${data.getFullYear()}-${pad(data.getMonth() + 1)}-${pad(data.getDate())}`;
+}
+
+function formatarDataCurta(data) {
+  return `${pad(data.getDate())}/${pad(data.getMonth() + 1)}`;
+}
+
+function formatarIntervaloDaSemana(diasDaSemana) {
+  const primeiro = diasDaSemana[0];
+  const ultimo = diasDaSemana[diasDaSemana.length - 1];
+  return `${formatarDataCurta(primeiro)} – ${formatarDataCurta(ultimo)}`;
+}
+
+function formatarRotuloDoSlot(chave) {
+  const match = chave.match(/^(\d{4})-(\d{2})-(\d{2})-(\d{2}:\d{2})$/);
+  if (!match) return chave;
+  const [, ano, mes, dia, hora] = match;
+  const data = new Date(Number(ano), Number(mes) - 1, Number(dia));
+  const nomeDia = DIAS_SEMANA[(data.getDay() + 6) % 7];
+  return `${nomeDia}, ${dia}/${mes} às ${hora}`;
 }
 
 const HORARIOS = gerarHorarios(HORA_INICIO, HORA_FIM);
 
 // Mock data: reuniões já agendadas com clientes (viriam do banco de dados numa fase futura).
-// Os horários bloqueados por eventos "Interna" agora vêm do Google Agenda via /api/calendar
-// (ver useEffect abaixo) em vez de dados fictícios fixos.
-const AGENDA_INICIAL = {
-  'Quinta-feira-10:00': { status: 'ocupado', valor: '6717' },
-  'Quinta-feira-10:30': { status: 'ocupado', valor: '6717' },
-  'Quinta-feira-11:00': { status: 'ocupado', valor: '6688' },
-  'Quinta-feira-11:30': { status: 'ocupado', valor: '6688' },
-  'Sexta-feira-10:00': { status: 'ocupado', valor: '6688' },
-  'Sexta-feira-10:30': { status: 'ocupado', valor: '6688' },
-  'Terça-feira-14:00': { status: 'ocupado', valor: '6717' },
-  'Terça-feira-14:30': { status: 'ocupado', valor: '6717' },
-  'Terça-feira-15:00': { status: 'ocupado', valor: '6717' },
-  'Terça-feira-15:30': { status: 'ocupado', valor: '6717' },
-  'Quarta-feira-14:00': { status: 'ocupado', valor: '6609' },
-  'Quinta-feira-14:00': { status: 'ocupado', valor: '6688' },
-  'Quinta-feira-14:30': { status: 'ocupado', valor: '6717' },
-  'Quinta-feira-15:00': { status: 'ocupado', valor: '6717' },
-  'Sexta-feira-15:30': { status: 'ocupado', valor: '6750' },
-};
+// Geradas com base na semana atual real, pra sempre aparecerem na "Semana Atual" ao testar.
+function gerarAgendaInicial() {
+  const [, terca, quarta, quinta, sexta] = obterDiasDaSemana(0).map(formatarChaveData);
+
+  return {
+    [`${quinta}-10:00`]: { status: 'ocupado', valor: '6717' },
+    [`${quinta}-10:30`]: { status: 'ocupado', valor: '6717' },
+    [`${quinta}-11:00`]: { status: 'ocupado', valor: '6688' },
+    [`${quinta}-11:30`]: { status: 'ocupado', valor: '6688' },
+    [`${sexta}-10:00`]: { status: 'ocupado', valor: '6688' },
+    [`${sexta}-10:30`]: { status: 'ocupado', valor: '6688' },
+    [`${terca}-14:00`]: { status: 'ocupado', valor: '6717' },
+    [`${terca}-14:30`]: { status: 'ocupado', valor: '6717' },
+    [`${terca}-15:00`]: { status: 'ocupado', valor: '6717' },
+    [`${terca}-15:30`]: { status: 'ocupado', valor: '6717' },
+    [`${quarta}-14:00`]: { status: 'ocupado', valor: '6609' },
+    [`${quinta}-14:00`]: { status: 'ocupado', valor: '6688' },
+    [`${quinta}-14:30`]: { status: 'ocupado', valor: '6717' },
+    [`${quinta}-15:00`]: { status: 'ocupado', valor: '6717' },
+    [`${sexta}-15:30`]: { status: 'ocupado', valor: '6750' },
+  };
+}
 
 export default function Calendar() {
-  const [agenda, setAgenda] = useState(AGENDA_INICIAL);
+  const [agenda, setAgenda] = useState(() => gerarAgendaInicial());
   const [selecionados, setSelecionados] = useState([]);
   const [temaId, setTemaId] = useState('esmeralda');
-  const [sincronizando, setSincronizando] = useState(true);
-  const [erroSincronizacao, setErroSincronizacao] = useState(null);
-  const diasDoMes = getDiasDoMesDaSemanaAtual();
+  const [deltaSemanas, setDeltaSemanas] = useState(0);
+  const [menuAberto, setMenuAberto] = useState(null); // chave do slot com o menu de ação aberto
+  const [pronto, setPronto] = useState(false);
+
   const tema = TEMAS[temaId];
+  const diasDaSemana = obterDiasDaSemana(deltaSemanas);
 
+  // Hidrata do localStorage uma única vez, no primeiro carregamento no navegador.
   useEffect(() => {
-    let cancelado = false;
-
-    async function carregarAgendaDoGoogle() {
-      setSincronizando(true);
-      setErroSincronizacao(null);
-      try {
-        const resposta = await fetch('/api/calendar');
-        const dados = await resposta.json();
-        if (!resposta.ok) throw new Error(dados?.erro || 'Falha ao carregar o Google Agenda.');
-
-        if (!cancelado) {
-          // Os horários que vêm do Google têm prioridade sobre qualquer dado local
-          // com a mesma chave (são a fonte real de verdade para "ocupado/interna").
-          setAgenda((atual) => ({ ...atual, ...dados.horariosOcupados }));
-        }
-      } catch (erro) {
-        if (!cancelado) setErroSincronizacao(erro.message);
-      } finally {
-        if (!cancelado) setSincronizando(false);
-      }
+    try {
+      const salvo = window.localStorage.getItem(CHAVE_STORAGE);
+      if (salvo) setAgenda(JSON.parse(salvo));
+    } catch (erro) {
+      console.error('Não foi possível carregar a agenda salva do localStorage:', erro);
     }
-
-    carregarAgendaDoGoogle();
-    return () => {
-      cancelado = true;
-    };
+    setPronto(true);
   }, []);
+
+  // Persiste toda alteração no localStorage — só depois de hidratar, pra não sobrescrever
+  // um estado já salvo com os dados fictícios iniciais antes de lê-lo.
+  useEffect(() => {
+    if (!pronto) return;
+    window.localStorage.setItem(CHAVE_STORAGE, JSON.stringify(agenda));
+  }, [agenda, pronto]);
 
   function getStatus(chave) {
     if (agenda[chave]) return agenda[chave].status;
@@ -221,12 +251,25 @@ export default function Calendar() {
     });
   }
 
+  function marcarBloqueioInterno(chave) {
+    setAgenda((atual) => ({
+      ...atual,
+      [chave]: { status: 'interna', valor: 'Interna' },
+    }));
+    setSelecionados((atual) => atual.filter((c) => c !== chave));
+  }
+
   function handleClickCelula(chave) {
     const status = getStatus(chave);
 
     if (ehBloqueado(status)) return;
 
-    if (status === 'disponivel' || status === 'selecionado') {
+    if (status === 'disponivel') {
+      setMenuAberto(chave);
+      return;
+    }
+
+    if (status === 'selecionado') {
       alternarSelecao(chave);
       return;
     }
@@ -244,14 +287,13 @@ export default function Calendar() {
   function estiloDaCelula(status) {
     if (status === 'disponivel') return tema.disponivel;
     if (status === 'confirmado') return tema.confirmado;
-    if (ehBloqueado(status)) return ESTILOS_FIXOS.bloqueado;
     return ESTILOS_FIXOS[status];
   }
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6">
       <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl border border-gray-100 p-6 sm:p-8">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5 mb-8">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5 mb-5">
           <div>
             <h1 className="flex items-center gap-2 text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">
               <CalendarDays className={`w-7 h-7 ${tema.icone}`} />
@@ -277,19 +319,36 @@ export default function Calendar() {
           </div>
         </div>
 
-        {sincronizando && (
-          <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            Sincronizando com o Google Agenda...
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 mb-6">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setDeltaSemanas((atual) => atual - 1)}
+              className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-white hover:shadow-sm transition"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Semana Anterior
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeltaSemanas(0)}
+              className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                deltaSemanas === 0 ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:bg-white hover:shadow-sm'
+              }`}
+            >
+              Semana Atual
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeltaSemanas((atual) => atual + 1)}
+              className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-white hover:shadow-sm transition"
+            >
+              Próxima Semana
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
-        )}
-
-        {erroSincronizacao && (
-          <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-            <TriangleAlert className="w-4 h-4 shrink-0" />
-            Não foi possível sincronizar com o Google Agenda ({erroSincronizacao}). Exibindo apenas os dados locais.
-          </div>
-        )}
+          <div className="text-sm font-medium text-gray-500">{formatarIntervaloDaSemana(diasDaSemana)}</div>
+        </div>
 
         <div className="grid grid-cols-[80px_repeat(5,1fr)] gap-2">
           <div className="rounded-lg bg-white border border-gray-200 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-gray-400">
@@ -298,9 +357,10 @@ export default function Calendar() {
           {DIAS_SEMANA.map((dia, index) => (
             <div
               key={dia}
-              className={`rounded-lg text-white font-semibold py-2.5 text-center text-xs sm:text-sm uppercase tracking-wide shadow-sm ${tema.cabecalho}`}
+              className={`rounded-lg text-white py-2.5 px-1 text-center shadow-sm ${tema.cabecalho}`}
             >
-              {dia} {diasDoMes[index]}
+              <div className="text-xs sm:text-sm font-semibold uppercase tracking-wide">{dia}</div>
+              <div className="text-[11px] sm:text-xs opacity-80">{formatarDataCurta(diasDaSemana[index])}</div>
             </div>
           ))}
 
@@ -311,8 +371,8 @@ export default function Calendar() {
               >
                 {hora}
               </div>
-              {DIAS_SEMANA.map((dia) => {
-                const chave = `${dia}-${hora}`;
+              {DIAS_SEMANA.map((dia, index) => {
+                const chave = `${formatarChaveData(diasDaSemana[index])}-${hora}`;
                 const celula = agenda[chave];
                 const status = getStatus(chave);
                 const bloqueado = ehBloqueado(status);
@@ -344,8 +404,64 @@ export default function Calendar() {
           <LegendaItem cor={ESTILOS_FIXOS.selecionado} texto="Selecionado" />
           <LegendaItem cor={ESTILOS_FIXOS.sugestao} texto="Sugestão enviada" />
           <LegendaItem cor={tema.confirmado} texto="Confirmado" />
-          <LegendaItem cor={ESTILOS_FIXOS.bloqueado} texto="Bloqueado (Google Agenda)" />
+          <LegendaItem cor={ESTILOS_FIXOS.ocupado} texto="Ocupado" />
+          <LegendaItem cor={ESTILOS_FIXOS.interna} texto="Bloqueio interno" />
         </div>
+      </div>
+
+      {menuAberto && (
+        <MenuDeAcao
+          chave={menuAberto}
+          tema={tema}
+          onSelecionarCliente={() => {
+            alternarSelecao(menuAberto);
+            setMenuAberto(null);
+          }}
+          onBloqueioInterno={() => {
+            marcarBloqueioInterno(menuAberto);
+            setMenuAberto(null);
+          }}
+          onFechar={() => setMenuAberto(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function MenuDeAcao({ chave, tema, onSelecionarCliente, onBloqueioInterno, onFechar }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      onClick={onFechar}
+    >
+      <div className="w-full max-w-xs bg-white rounded-2xl shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Horário selecionado</p>
+        <p className="text-sm font-semibold text-gray-900 mb-4">{formatarRotuloDoSlot(chave)}</p>
+
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={onSelecionarCliente}
+            className={`rounded-lg py-2.5 text-sm font-semibold text-white shadow-sm transition-colors ${tema.botao}`}
+          >
+            Selecionar para Cliente
+          </button>
+          <button
+            type="button"
+            onClick={onBloqueioInterno}
+            className="rounded-lg py-2.5 text-sm font-semibold text-white bg-gray-700 hover:bg-gray-800 shadow-sm transition-colors"
+          >
+            Marcar Bloqueio Interno
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={onFechar}
+          className="mt-3 w-full text-center text-xs text-gray-400 hover:text-gray-600"
+        >
+          Cancelar
+        </button>
       </div>
     </div>
   );
