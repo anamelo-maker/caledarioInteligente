@@ -32,64 +32,93 @@ function getDiasDoMesDaSemanaAtual() {
 
 const HORARIOS = gerarHorarios();
 
-// Mock data apenas para a Fase 1 (visual + estado local), sem persistência real.
+// Mock data: horários que já nascem ocupados (reunião interna ou já agendada com um cliente).
+// Tudo que não está aqui começa "disponivel" (verde claro).
 const AGENDA_INICIAL = {
   'Quarta-feira-10:00': { status: 'interna', valor: 'Interna' },
   'Quarta-feira-10:30': { status: 'interna', valor: 'Interna' },
   'Quarta-feira-11:00': { status: 'interna', valor: 'Interna' },
   'Quarta-feira-11:30': { status: 'interna', valor: 'Interna' },
-  'Quinta-feira-10:00': { status: 'confirmado', valor: '6717' },
-  'Quinta-feira-10:30': { status: 'confirmado', valor: '6717' },
-  'Quinta-feira-11:00': { status: 'confirmado', valor: '6688' },
-  'Quinta-feira-11:30': { status: 'confirmado', valor: '6688' },
-  'Sexta-feira-10:00': { status: 'confirmado', valor: '6688' },
-  'Sexta-feira-10:30': { status: 'confirmado', valor: '6688' },
-  'Terça-feira-14:00': { status: 'confirmado', valor: '6717' },
-  'Terça-feira-14:30': { status: 'confirmado', valor: '6717' },
-  'Terça-feira-15:00': { status: 'confirmado', valor: '6717' },
-  'Terça-feira-15:30': { status: 'confirmado', valor: '6717' },
-  'Quarta-feira-14:00': { status: 'confirmado', valor: '6609' },
+  'Quinta-feira-10:00': { status: 'ocupado', valor: '6717' },
+  'Quinta-feira-10:30': { status: 'ocupado', valor: '6717' },
+  'Quinta-feira-11:00': { status: 'ocupado', valor: '6688' },
+  'Quinta-feira-11:30': { status: 'ocupado', valor: '6688' },
+  'Sexta-feira-10:00': { status: 'ocupado', valor: '6688' },
+  'Sexta-feira-10:30': { status: 'ocupado', valor: '6688' },
+  'Terça-feira-14:00': { status: 'ocupado', valor: '6717' },
+  'Terça-feira-14:30': { status: 'ocupado', valor: '6717' },
+  'Terça-feira-15:00': { status: 'ocupado', valor: '6717' },
+  'Terça-feira-15:30': { status: 'ocupado', valor: '6717' },
+  'Quarta-feira-14:00': { status: 'ocupado', valor: '6609' },
   'Quarta-feira-15:00': { status: 'interna', valor: 'Interna' },
   'Quarta-feira-15:30': { status: 'interna', valor: 'Interna' },
-  'Quinta-feira-14:00': { status: 'confirmado', valor: '6688' },
-  'Quinta-feira-14:30': { status: 'confirmado', valor: '6717' },
-  'Quinta-feira-15:00': { status: 'confirmado', valor: '6717' },
-  'Sexta-feira-15:30': { status: 'confirmado', valor: '6750' },
+  'Quinta-feira-14:00': { status: 'ocupado', valor: '6688' },
+  'Quinta-feira-14:30': { status: 'ocupado', valor: '6717' },
+  'Quinta-feira-15:00': { status: 'ocupado', valor: '6717' },
+  'Sexta-feira-15:30': { status: 'ocupado', valor: '6750' },
 };
 
 const ESTILOS_POR_STATUS = {
   disponivel: 'bg-green-200 hover:bg-green-300 cursor-pointer text-green-900',
   interna: 'bg-green-200 text-gray-700 italic cursor-default',
-  confirmado: 'bg-green-200 text-blue-900 font-bold cursor-default',
+  ocupado: 'bg-green-200 text-blue-900 font-bold cursor-default',
   sugestao: 'bg-yellow-300 hover:bg-yellow-400 text-yellow-900 font-bold cursor-pointer',
+  confirmado: 'bg-green-700 text-white font-bold cursor-default',
 };
 
 export default function Calendar() {
   const [agenda, setAgenda] = useState(AGENDA_INICIAL);
   const diasDoMes = getDiasDoMesDaSemanaAtual();
 
+  function sugerirHorario(chave) {
+    const idCliente = window.prompt('Qual o ID do cliente?');
+    if (!idCliente || !idCliente.trim()) return;
+
+    setAgenda((atual) => ({
+      ...atual,
+      [chave]: { status: 'sugestao', valor: idCliente.trim() },
+    }));
+  }
+
+  function confirmarHorario(chave, celula) {
+    const confirmar = window.confirm(`Confirmar este horário para o cliente ${celula.valor}?`);
+    if (!confirmar) return;
+
+    setAgenda((atual) => {
+      const proximaAgenda = { ...atual };
+
+      // Slot escolhido vira confirmado (verde escuro).
+      proximaAgenda[chave] = { status: 'confirmado', valor: celula.valor };
+
+      // Regra de ouro: as demais sugestões do mesmo cliente voltam a ficar disponíveis.
+      Object.entries(atual).forEach(([chaveExistente, celulaExistente]) => {
+        if (
+          chaveExistente !== chave &&
+          celulaExistente.status === 'sugestao' &&
+          celulaExistente.valor === celula.valor
+        ) {
+          delete proximaAgenda[chaveExistente];
+        }
+      });
+
+      return proximaAgenda;
+    });
+  }
+
   function handleClickCelula(chave, celula) {
-    if (!celula) {
-      const idCliente = window.prompt('Qual o ID do cliente?');
-      if (idCliente && idCliente.trim()) {
-        setAgenda((atual) => ({
-          ...atual,
-          [chave]: { status: 'sugestao', valor: idCliente.trim() },
-        }));
-      }
+    const status = celula?.status ?? 'disponivel';
+
+    if (status === 'disponivel') {
+      sugerirHorario(chave);
       return;
     }
 
-    if (celula.status === 'sugestao') {
-      const confirmarRemocao = window.confirm(`Remover a sugestão para o cliente ${celula.valor}?`);
-      if (confirmarRemocao) {
-        setAgenda((atual) => {
-          const proximaAgenda = { ...atual };
-          delete proximaAgenda[chave];
-          return proximaAgenda;
-        });
-      }
+    if (status === 'sugestao') {
+      confirmarHorario(chave, celula);
+      return;
     }
+
+    // 'interna', 'ocupado' e 'confirmado' são somente leitura.
   }
 
   return (
@@ -137,8 +166,9 @@ export default function Calendar() {
       </div>
 
       <div className="flex flex-wrap gap-4 mt-6 text-sm text-gray-600">
-        <LegendaItem cor="bg-green-200" texto="Disponível / Interna / Confirmado" />
+        <LegendaItem cor="bg-green-200" texto="Disponível / Interna / Ocupado" />
         <LegendaItem cor="bg-yellow-300" texto="Sugestão enviada ao cliente" />
+        <LegendaItem cor="bg-green-700" texto="Confirmado" />
       </div>
     </div>
   );
