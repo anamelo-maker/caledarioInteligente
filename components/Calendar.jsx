@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { CalendarDays, Lock, Palette } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CalendarDays, Loader2, Lock, Palette, TriangleAlert } from 'lucide-react';
 
 const DIAS_SEMANA = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira'];
 const MAXIMO_SELECIONADOS = 4;
@@ -91,14 +91,10 @@ function getDiasDoMesDaSemanaAtual() {
 
 const HORARIOS = gerarHorarios(HORA_INICIO, HORA_FIM);
 
-// Mock data: horários que já nascem ocupados (reunião interna, ou já agendada em outro sistema).
-// No futuro isso virá do Google Agenda como horários "Ocupados". Tudo que não está aqui
-// começa "disponivel" (verde claro / cor do tema).
+// Mock data: reuniões já agendadas com clientes (viriam do banco de dados numa fase futura).
+// Os horários bloqueados por eventos "Interna" agora vêm do Google Agenda via /api/calendar
+// (ver useEffect abaixo) em vez de dados fictícios fixos.
 const AGENDA_INICIAL = {
-  'Quarta-feira-10:00': { status: 'interna', valor: 'Interna' },
-  'Quarta-feira-10:30': { status: 'interna', valor: 'Interna' },
-  'Quarta-feira-11:00': { status: 'interna', valor: 'Interna' },
-  'Quarta-feira-11:30': { status: 'interna', valor: 'Interna' },
   'Quinta-feira-10:00': { status: 'ocupado', valor: '6717' },
   'Quinta-feira-10:30': { status: 'ocupado', valor: '6717' },
   'Quinta-feira-11:00': { status: 'ocupado', valor: '6688' },
@@ -110,8 +106,6 @@ const AGENDA_INICIAL = {
   'Terça-feira-15:00': { status: 'ocupado', valor: '6717' },
   'Terça-feira-15:30': { status: 'ocupado', valor: '6717' },
   'Quarta-feira-14:00': { status: 'ocupado', valor: '6609' },
-  'Quarta-feira-15:00': { status: 'interna', valor: 'Interna' },
-  'Quarta-feira-15:30': { status: 'interna', valor: 'Interna' },
   'Quinta-feira-14:00': { status: 'ocupado', valor: '6688' },
   'Quinta-feira-14:30': { status: 'ocupado', valor: '6717' },
   'Quinta-feira-15:00': { status: 'ocupado', valor: '6717' },
@@ -122,8 +116,39 @@ export default function Calendar() {
   const [agenda, setAgenda] = useState(AGENDA_INICIAL);
   const [selecionados, setSelecionados] = useState([]);
   const [temaId, setTemaId] = useState('esmeralda');
+  const [sincronizando, setSincronizando] = useState(true);
+  const [erroSincronizacao, setErroSincronizacao] = useState(null);
   const diasDoMes = getDiasDoMesDaSemanaAtual();
   const tema = TEMAS[temaId];
+
+  useEffect(() => {
+    let cancelado = false;
+
+    async function carregarAgendaDoGoogle() {
+      setSincronizando(true);
+      setErroSincronizacao(null);
+      try {
+        const resposta = await fetch('/api/calendar');
+        const dados = await resposta.json();
+        if (!resposta.ok) throw new Error(dados?.erro || 'Falha ao carregar o Google Agenda.');
+
+        if (!cancelado) {
+          // Os horários que vêm do Google têm prioridade sobre qualquer dado local
+          // com a mesma chave (são a fonte real de verdade para "ocupado/interna").
+          setAgenda((atual) => ({ ...atual, ...dados.horariosOcupados }));
+        }
+      } catch (erro) {
+        if (!cancelado) setErroSincronizacao(erro.message);
+      } finally {
+        if (!cancelado) setSincronizando(false);
+      }
+    }
+
+    carregarAgendaDoGoogle();
+    return () => {
+      cancelado = true;
+    };
+  }, []);
 
   function getStatus(chave) {
     if (agenda[chave]) return agenda[chave].status;
@@ -251,6 +276,20 @@ export default function Calendar() {
             </button>
           </div>
         </div>
+
+        {sincronizando && (
+          <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Sincronizando com o Google Agenda...
+          </div>
+        )}
+
+        {erroSincronizacao && (
+          <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+            <TriangleAlert className="w-4 h-4 shrink-0" />
+            Não foi possível sincronizar com o Google Agenda ({erroSincronizacao}). Exibindo apenas os dados locais.
+          </div>
+        )}
 
         <div className="grid grid-cols-[80px_repeat(5,1fr)] gap-2">
           <div className="rounded-lg bg-white border border-gray-200 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-gray-400">
