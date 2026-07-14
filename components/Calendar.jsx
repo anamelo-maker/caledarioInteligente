@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { CalendarDays } from 'lucide-react';
 
 const DIAS_SEMANA = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira'];
+const MAXIMO_SELECIONADOS = 4;
 
 function gerarHorarios(inicioHora = 10, fimHora = 18, intervaloMinutos = 30) {
   const horarios = [];
@@ -60,24 +61,51 @@ const AGENDA_INICIAL = {
 
 const ESTILOS_POR_STATUS = {
   disponivel: 'bg-green-200 hover:bg-green-300 cursor-pointer text-green-900',
+  selecionado: 'bg-blue-200 hover:bg-blue-300 cursor-pointer text-blue-900 font-semibold ring-2 ring-blue-400',
   interna: 'bg-green-200 text-gray-700 italic cursor-default',
   ocupado: 'bg-green-200 text-blue-900 font-bold cursor-default',
   sugestao: 'bg-yellow-300 hover:bg-yellow-400 text-yellow-900 font-bold cursor-pointer',
-  confirmado: 'bg-green-700 text-white font-bold cursor-default',
+  confirmado: 'bg-green-700 hover:bg-green-800 text-white font-bold cursor-pointer',
 };
 
 export default function Calendar() {
   const [agenda, setAgenda] = useState(AGENDA_INICIAL);
+  const [selecionados, setSelecionados] = useState([]);
   const diasDoMes = getDiasDoMesDaSemanaAtual();
 
-  function sugerirHorario(chave) {
+  function getStatus(chave) {
+    if (agenda[chave]) return agenda[chave].status;
+    return selecionados.includes(chave) ? 'selecionado' : 'disponivel';
+  }
+
+  function alternarSelecao(chave) {
+    setSelecionados((atual) => {
+      if (atual.includes(chave)) {
+        return atual.filter((c) => c !== chave);
+      }
+      if (atual.length >= MAXIMO_SELECIONADOS) {
+        window.alert(`Você já selecionou o máximo de ${MAXIMO_SELECIONADOS} horários. Desmarque um antes de escolher outro.`);
+        return atual;
+      }
+      return [...atual, chave];
+    });
+  }
+
+  function aplicarIdNasSugestoes() {
+    if (selecionados.length === 0) return;
+
     const idCliente = window.prompt('Qual o ID do cliente?');
     if (!idCliente || !idCliente.trim()) return;
+    const idFinal = idCliente.trim();
 
-    setAgenda((atual) => ({
-      ...atual,
-      [chave]: { status: 'sugestao', valor: idCliente.trim() },
-    }));
+    setAgenda((atual) => {
+      const proximaAgenda = { ...atual };
+      selecionados.forEach((chave) => {
+        proximaAgenda[chave] = { status: 'sugestao', valor: idFinal };
+      });
+      return proximaAgenda;
+    });
+    setSelecionados([]);
   }
 
   function confirmarHorario(chave, celula) {
@@ -105,28 +133,55 @@ export default function Calendar() {
     });
   }
 
-  function handleClickCelula(chave, celula) {
-    const status = celula?.status ?? 'disponivel';
+  function desmarcarHorario(chave) {
+    const desmarcar = window.confirm('Deseja desmarcar este horário e liberá-lo novamente?');
+    if (!desmarcar) return;
 
-    if (status === 'disponivel') {
-      sugerirHorario(chave);
+    setAgenda((atual) => {
+      const proximaAgenda = { ...atual };
+      delete proximaAgenda[chave];
+      return proximaAgenda;
+    });
+  }
+
+  function handleClickCelula(chave) {
+    const status = getStatus(chave);
+
+    if (status === 'disponivel' || status === 'selecionado') {
+      alternarSelecao(chave);
       return;
     }
 
     if (status === 'sugestao') {
-      confirmarHorario(chave, celula);
+      confirmarHorario(chave, agenda[chave]);
       return;
     }
 
-    // 'interna', 'ocupado' e 'confirmado' são somente leitura.
+    if (status === 'confirmado') {
+      desmarcarHorario(chave);
+      return;
+    }
+
+    // 'interna' e 'ocupado' são somente leitura.
   }
 
   return (
     <div className="max-w-6xl mx-auto p-6">
-      <h1 className="flex items-center gap-2 text-2xl font-bold text-green-800 mb-6">
-        <CalendarDays className="w-7 h-7" />
-        Reuniões da semana
-      </h1>
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <h1 className="flex items-center gap-2 text-2xl font-bold text-green-800">
+          <CalendarDays className="w-7 h-7" />
+          Reuniões da semana
+        </h1>
+
+        <button
+          type="button"
+          onClick={aplicarIdNasSugestoes}
+          disabled={selecionados.length === 0}
+          className="rounded-md px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+        >
+          Aplicar ID nas Sugestões {selecionados.length > 0 ? `(${selecionados.length}/${MAXIMO_SELECIONADOS})` : ''}
+        </button>
+      </div>
 
       <div className="grid grid-cols-[90px_repeat(5,1fr)] gap-1.5">
         <div className="bg-orange-400 text-white font-bold rounded-md py-2 text-center text-sm">
@@ -149,12 +204,12 @@ export default function Calendar() {
             {DIAS_SEMANA.map((dia) => {
               const chave = `${dia}-${hora}`;
               const celula = agenda[chave];
-              const status = celula?.status ?? 'disponivel';
+              const status = getStatus(chave);
               return (
                 <button
                   key={chave}
                   type="button"
-                  onClick={() => handleClickCelula(chave, celula)}
+                  onClick={() => handleClickCelula(chave)}
                   className={`rounded-md py-2 text-center text-sm transition-colors ${ESTILOS_POR_STATUS[status]}`}
                 >
                   {celula?.valor ?? ''}
@@ -167,6 +222,7 @@ export default function Calendar() {
 
       <div className="flex flex-wrap gap-4 mt-6 text-sm text-gray-600">
         <LegendaItem cor="bg-green-200" texto="Disponível / Interna / Ocupado" />
+        <LegendaItem cor="bg-blue-200" texto="Selecionado" />
         <LegendaItem cor="bg-yellow-300" texto="Sugestão enviada ao cliente" />
         <LegendaItem cor="bg-green-700" texto="Confirmado" />
       </div>
