@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Lock, Palette } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Palette } from 'lucide-react';
 
 const DIAS_SEMANA = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira'];
 const MAXIMO_SELECIONADOS = 4;
@@ -58,13 +58,8 @@ const TEMAS = {
 const ESTILOS_FIXOS = {
   selecionado: 'bg-blue-100 hover:bg-blue-200 text-blue-800 font-semibold ring-2 ring-blue-400 shadow-sm cursor-pointer',
   sugestao: 'bg-amber-300 hover:bg-amber-400 text-amber-900 font-semibold shadow-sm cursor-pointer',
-  ocupado: 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed',
-  interna: 'bg-gray-700 text-white font-semibold cursor-not-allowed shadow-inner',
+  interna: 'bg-gray-700 hover:bg-gray-800 text-white font-semibold cursor-pointer shadow-inner',
 };
-
-function ehBloqueado(status) {
-  return status === 'interna' || status === 'ocupado';
-}
 
 function pad(numero) {
   return String(numero).padStart(2, '0');
@@ -116,47 +111,13 @@ function formatarIntervaloDaSemana(diasDaSemana) {
   return `${formatarDataCurta(primeiro)} – ${formatarDataCurta(ultimo)}`;
 }
 
-function formatarRotuloDoSlot(chave) {
-  const match = chave.match(/^(\d{4})-(\d{2})-(\d{2})-(\d{2}:\d{2})$/);
-  if (!match) return chave;
-  const [, ano, mes, dia, hora] = match;
-  const data = new Date(Number(ano), Number(mes) - 1, Number(dia));
-  const nomeDia = DIAS_SEMANA[(data.getDay() + 6) % 7];
-  return `${nomeDia}, ${dia}/${mes} às ${hora}`;
-}
-
 const HORARIOS = gerarHorarios(HORA_INICIO, HORA_FIM);
 
-// Mock data: reuniões já agendadas com clientes (viriam do banco de dados numa fase futura).
-// Geradas com base na semana atual real, pra sempre aparecerem na "Semana Atual" ao testar.
-function gerarAgendaInicial() {
-  const [, terca, quarta, quinta, sexta] = obterDiasDaSemana(0).map(formatarChaveData);
-
-  return {
-    [`${quinta}-10:00`]: { status: 'ocupado', valor: '6717' },
-    [`${quinta}-10:30`]: { status: 'ocupado', valor: '6717' },
-    [`${quinta}-11:00`]: { status: 'ocupado', valor: '6688' },
-    [`${quinta}-11:30`]: { status: 'ocupado', valor: '6688' },
-    [`${sexta}-10:00`]: { status: 'ocupado', valor: '6688' },
-    [`${sexta}-10:30`]: { status: 'ocupado', valor: '6688' },
-    [`${terca}-14:00`]: { status: 'ocupado', valor: '6717' },
-    [`${terca}-14:30`]: { status: 'ocupado', valor: '6717' },
-    [`${terca}-15:00`]: { status: 'ocupado', valor: '6717' },
-    [`${terca}-15:30`]: { status: 'ocupado', valor: '6717' },
-    [`${quarta}-14:00`]: { status: 'ocupado', valor: '6609' },
-    [`${quinta}-14:00`]: { status: 'ocupado', valor: '6688' },
-    [`${quinta}-14:30`]: { status: 'ocupado', valor: '6717' },
-    [`${quinta}-15:00`]: { status: 'ocupado', valor: '6717' },
-    [`${sexta}-15:30`]: { status: 'ocupado', valor: '6750' },
-  };
-}
-
 export default function Calendar() {
-  const [agenda, setAgenda] = useState(() => gerarAgendaInicial());
+  const [agenda, setAgenda] = useState({});
   const [selecionados, setSelecionados] = useState([]);
   const [temaId, setTemaId] = useState('esmeralda');
   const [deltaSemanas, setDeltaSemanas] = useState(0);
-  const [menuAberto, setMenuAberto] = useState(null); // chave do slot com o menu de ação aberto
   const [pronto, setPronto] = useState(false);
 
   const tema = TEMAS[temaId];
@@ -174,7 +135,7 @@ export default function Calendar() {
   }, []);
 
   // Persiste toda alteração no localStorage — só depois de hidratar, pra não sobrescrever
-  // um estado já salvo com os dados fictícios iniciais antes de lê-lo.
+  // um estado já salvo com o objeto vazio inicial antes de lê-lo.
   useEffect(() => {
     if (!pronto) return;
     window.localStorage.setItem(CHAVE_STORAGE, JSON.stringify(agenda));
@@ -209,6 +170,19 @@ export default function Calendar() {
       const proximaAgenda = { ...atual };
       selecionados.forEach((chave) => {
         proximaAgenda[chave] = { status: 'sugestao', valor: idFinal };
+      });
+      return proximaAgenda;
+    });
+    setSelecionados([]);
+  }
+
+  function aplicarBloqueioInterno() {
+    if (selecionados.length === 0) return;
+
+    setAgenda((atual) => {
+      const proximaAgenda = { ...atual };
+      selecionados.forEach((chave) => {
+        proximaAgenda[chave] = { status: 'interna', valor: 'Interna' };
       });
       return proximaAgenda;
     });
@@ -251,25 +225,21 @@ export default function Calendar() {
     });
   }
 
-  function marcarBloqueioInterno(chave) {
-    setAgenda((atual) => ({
-      ...atual,
-      [chave]: { status: 'interna', valor: 'Interna' },
-    }));
-    setSelecionados((atual) => atual.filter((c) => c !== chave));
+  function desmarcarBloqueioInterno(chave) {
+    const desmarcar = window.confirm('Deseja remover este bloqueio interno e liberar o horário novamente?');
+    if (!desmarcar) return;
+
+    setAgenda((atual) => {
+      const proximaAgenda = { ...atual };
+      delete proximaAgenda[chave];
+      return proximaAgenda;
+    });
   }
 
   function handleClickCelula(chave) {
     const status = getStatus(chave);
 
-    if (ehBloqueado(status)) return;
-
-    if (status === 'disponivel') {
-      setMenuAberto(chave);
-      return;
-    }
-
-    if (status === 'selecionado') {
+    if (status === 'disponivel' || status === 'selecionado') {
       alternarSelecao(chave);
       return;
     }
@@ -281,6 +251,11 @@ export default function Calendar() {
 
     if (status === 'confirmado') {
       desmarcarHorario(chave);
+      return;
+    }
+
+    if (status === 'interna') {
+      desmarcarBloqueioInterno(chave);
     }
   }
 
@@ -300,23 +275,35 @@ export default function Calendar() {
               Reuniões da semana
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              Selecione até {MAXIMO_SELECIONADOS} horários disponíveis e envie a sugestão para o cliente.
+              Selecione até {MAXIMO_SELECIONADOS} horários e escolha uma ação abaixo.
             </p>
           </div>
 
-          <div className="flex items-center gap-5">
-            <SeletorDeTema temaId={temaId} onSelecionar={setTemaId} />
+          <SeletorDeTema temaId={temaId} onSelecionar={setTemaId} />
+        </div>
 
-            <button
-              type="button"
-              onClick={aplicarIdNasSugestoes}
-              disabled={selecionados.length === 0}
-              className={`rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed ${tema.botao}`}
-            >
-              Aplicar ID nas Sugestões
-              {selecionados.length > 0 ? ` (${selecionados.length}/${MAXIMO_SELECIONADOS})` : ''}
-            </button>
-          </div>
+        <div className="flex flex-wrap items-center gap-3 mb-6">
+          <button
+            type="button"
+            onClick={aplicarIdNasSugestoes}
+            disabled={selecionados.length === 0}
+            className={`rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed ${tema.botao}`}
+          >
+            Sugerir para Cliente
+          </button>
+          <button
+            type="button"
+            onClick={aplicarBloqueioInterno}
+            disabled={selecionados.length === 0}
+            className="rounded-lg px-4 py-2.5 text-sm font-semibold text-white bg-gray-700 hover:bg-gray-800 shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-500 disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed"
+          >
+            Bloqueio Interno
+          </button>
+          {selecionados.length > 0 && (
+            <span className="text-sm text-gray-500">
+              {selecionados.length}/{MAXIMO_SELECIONADOS} horários selecionados
+            </span>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 mb-6">
@@ -375,23 +362,14 @@ export default function Calendar() {
                 const chave = `${formatarChaveData(diasDaSemana[index])}-${hora}`;
                 const celula = agenda[chave];
                 const status = getStatus(chave);
-                const bloqueado = ehBloqueado(status);
                 return (
                   <button
                     key={chave}
                     type="button"
-                    disabled={bloqueado}
                     onClick={() => handleClickCelula(chave)}
                     className={`rounded-lg py-2.5 text-center text-sm transition-colors ${estiloDaCelula(status)}`}
                   >
-                    {bloqueado ? (
-                      <span className="flex items-center justify-center gap-1">
-                        <Lock className="w-3 h-3" />
-                        {celula.valor}
-                      </span>
-                    ) : (
-                      celula?.valor ?? ''
-                    )}
+                    {celula?.valor ?? ''}
                   </button>
                 );
               })}
@@ -404,64 +382,8 @@ export default function Calendar() {
           <LegendaItem cor={ESTILOS_FIXOS.selecionado} texto="Selecionado" />
           <LegendaItem cor={ESTILOS_FIXOS.sugestao} texto="Sugestão enviada" />
           <LegendaItem cor={tema.confirmado} texto="Confirmado" />
-          <LegendaItem cor={ESTILOS_FIXOS.ocupado} texto="Ocupado" />
           <LegendaItem cor={ESTILOS_FIXOS.interna} texto="Bloqueio interno" />
         </div>
-      </div>
-
-      {menuAberto && (
-        <MenuDeAcao
-          chave={menuAberto}
-          tema={tema}
-          onSelecionarCliente={() => {
-            alternarSelecao(menuAberto);
-            setMenuAberto(null);
-          }}
-          onBloqueioInterno={() => {
-            marcarBloqueioInterno(menuAberto);
-            setMenuAberto(null);
-          }}
-          onFechar={() => setMenuAberto(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-function MenuDeAcao({ chave, tema, onSelecionarCliente, onBloqueioInterno, onFechar }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-      onClick={onFechar}
-    >
-      <div className="w-full max-w-xs bg-white rounded-2xl shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Horário selecionado</p>
-        <p className="text-sm font-semibold text-gray-900 mb-4">{formatarRotuloDoSlot(chave)}</p>
-
-        <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={onSelecionarCliente}
-            className={`rounded-lg py-2.5 text-sm font-semibold text-white shadow-sm transition-colors ${tema.botao}`}
-          >
-            Selecionar para Cliente
-          </button>
-          <button
-            type="button"
-            onClick={onBloqueioInterno}
-            className="rounded-lg py-2.5 text-sm font-semibold text-white bg-gray-700 hover:bg-gray-800 shadow-sm transition-colors"
-          >
-            Marcar Bloqueio Interno
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={onFechar}
-          className="mt-3 w-full text-center text-xs text-gray-400 hover:text-gray-600"
-        >
-          Cancelar
-        </button>
       </div>
     </div>
   );
