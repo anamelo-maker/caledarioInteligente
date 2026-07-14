@@ -7,7 +7,9 @@ const DIAS_SEMANA = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-fe
 const MAXIMO_SELECIONADOS = 4;
 const HORA_INICIO = 9;
 const HORA_FIM = 18;
-const CHAVE_STORAGE = 'calendario-inteligente:agenda:v1';
+// v2: versão anterior podia ter dados fictícios ("ocupado") salvos no navegador;
+// mudar a chave garante que quem já testou a versão antiga comece com a semana limpa.
+const CHAVE_STORAGE = 'calendario-inteligente:agenda:v2';
 
 // Paletas de tema: cada valor é uma string literal completa de classes Tailwind
 // (necessário para o Tailwind conseguir detectá-las durante o build).
